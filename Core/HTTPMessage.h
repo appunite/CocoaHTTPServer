@@ -21,7 +21,7 @@
 - (id)initEmptyRequest;
 
 - (id)initRequestWithMethod:(NSString *)method URL:(NSURL *)url version:(NSString *)version;
-
+- (id)initRequestWithMessageRef:(CFHTTPMessageRef)messageRef;
 - (id)initResponseWithStatusCode:(NSInteger)code description:(NSString *)description version:(NSString *)version;
 
 - (BOOL)appendData:(NSData *)data;
@@ -29,6 +29,7 @@
 - (BOOL)isHeaderComplete;
 
 - (NSString *)version;
+- (CFHTTPMessageRef) messageRef;
 
 - (NSString *)method;
 - (NSURL *)url;

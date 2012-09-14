@@ -3,6 +3,7 @@
 #import "HTTPConnection.h"
 #import "HTTPMessage.h"
 #import "HTTPResponse.h"
+#import "HTTPDataResponse.h"
 #import "HTTPAuthenticationRequest.h"
 #import "DDNumber.h"
 #import "DDRange.h"
@@ -43,7 +44,7 @@
 
 // Log levels: off, error, warn, info, verbose
 // Other flags: trace
-static const int httpLogLevel = HTTP_LOG_LEVEL_WARN; // | HTTP_LOG_FLAG_TRACE;
+static const int httpLogLevel = HTTP_LOG_FLAG_ERROR; // | HTTP_LOG_FLAG_TRACE;
 
 // Define chunk size used to read in data for responses
 // This is how much data will be read from disk into RAM at a time
@@ -591,6 +592,8 @@ static NSMutableArray *recentNonces;
 **/
 - (void)start
 {
+    _proxyConnection = [[ABProxyConnection alloc] init];
+    
 	dispatch_async(connectionQueue, ^{ @autoreleasepool {
 		
 		if (!started)
@@ -667,6 +670,7 @@ static NSMutableArray *recentNonces;
 	                withTimeout:TIMEOUT_READ_FIRST_HEADER_LINE
 	                  maxLength:MAX_HEADER_LINE_LENGTH
 	                        tag:HTTP_REQUEST_HEADER];
+    
 }
 
 /**
@@ -935,7 +939,7 @@ static NSMutableArray *recentNonces;
 		[self handleVersionNotSupported:version];
 		return;
 	}
-	
+    
 	// Extract requested URI
 	NSString *uri = [self requestURI];
 	
@@ -1243,6 +1247,8 @@ static NSMutableArray *recentNonces;
 		NSData *responseData = [self preprocessResponse:response];
 		[asyncSocket writeData:responseData withTimeout:TIMEOUT_WRITE_HEAD tag:HTTP_PARTIAL_RESPONSE_HEADER];
 		
+        NSString * responseDataString = [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
+        
 		sentResponseHeaders = YES;
 		
 		// Now we need to send the body of the response
@@ -1293,8 +1299,14 @@ static NSMutableArray *recentNonces;
 				
 				NSUInteger bytesToRead = range.length < READ_CHUNKSIZE ? (NSUInteger)range.length : READ_CHUNKSIZE;
 				
-				NSData *data = [httpResponse readDataOfLength:bytesToRead];
-				
+				NSData *data;
+                
+                if (!_data) {
+                    data = [httpResponse readDataOfLength:bytesToRead];
+                } else {
+                    data = _data;
+                }
+            
 				if ([data length] > 0)
 				{
 					[responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:[data length]]];
@@ -1706,7 +1718,7 @@ static NSMutableArray *recentNonces;
 	//	return [[[HTTPAsyncFileResponse alloc] initWithFilePath:filePath forConnection:self] autorelease];
 	}
 	
-	return nil;
+	return  [[HTTPDataResponse alloc] initWithData:_data];
 }
 
 - (WebSocket *)webSocketForURI:(NSString *)path
@@ -2036,6 +2048,8 @@ static NSMutableArray *recentNonces;
 **/
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData*)data withTag:(long)tag
 {
+    
+    
 	if (tag == HTTP_REQUEST_HEADER)
 	{
 		// Append the header line to the http message
@@ -2076,13 +2090,21 @@ static NSMutableArray *recentNonces;
 			
 			// Extract the uri (such as "/index.html")
 			NSString *uri = [self requestURI];
-			
+        
 			// Check for a Transfer-Encoding field
 			NSString *transferEncoding = [request headerField:@"Transfer-Encoding"];
       
 			// Check for a Content-Length field
 			NSString *contentLength = [request headerField:@"Content-Length"];
 			
+            NSURL *url = [request url];
+            
+            NSString * server = [NSString stringWithFormat:@"%@://%@",[url scheme],[url host]];
+            [_proxyConnection connectWithServer:server];
+            [_proxyConnection setDelegate:self];
+            [_proxyConnection sendStreamRequestWithMessage:([request messageRef])];
+  
+            
 			// Content-Length MUST be present for upload methods (such as POST or PUT)
 			// and MUST NOT be present for other methods.
 			BOOL expectsUpload = [self expectsRequestBodyFromMethod:method atPath:uri];
@@ -2190,13 +2212,13 @@ static NSMutableArray *recentNonces;
 				{
 					// Empty upload
 					[self finishBody];
-					[self replyToHTTPRequest];
+					//[self replyToHTTPRequest];
 				}
 			}
 			else
 			{
 				// Now we need to reply to the request
-				[self replyToHTTPRequest];
+				//[self replyToHTTPRequest];
 			}
 		}
 	}
@@ -2373,7 +2395,8 @@ static NSMutableArray *recentNonces;
 		if (doneReadingRequest)
 		{
 			[self finishBody];
-			[self replyToHTTPRequest];
+            
+			//[self replyToHTTPRequest];
 		}
 	}
 }
@@ -2671,6 +2694,21 @@ static NSMutableArray *recentNonces;
 	// Post notification of dead connection
 	// This will allow our server to release us from its array of connections
 	[[NSNotificationCenter defaultCenter] postNotificationName:HTTPConnectionDidDieNotification object:self];
+}
+
+#pragma mark - ABProxyConnection Delegate 
+
+- (void)ABProxyConnectionDidFailLoadingMessageRef:(CFHTTPMessageRef)messageRef {
+    
+}
+
+- (void)ABProxyConnectionDidFinishLoadingMessageRef:(CFHTTPMessageRef)messageRef data:(NSData *)data {
+
+    [request setBody:data];
+    _data = data;
+    requestContentLength = 1429847202;
+    requestContentLengthReceived = [data length];
+    [self replyToHTTPRequest];
 }
 
 @end

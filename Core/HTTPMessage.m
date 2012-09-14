@@ -16,6 +16,15 @@
 	return self;
 }
 
+- (id)initRequestWithMessageRef:(CFHTTPMessageRef)messageRef
+{
+	if ((self = [super init]))
+	{
+		message = messageRef;
+	}
+	return self;
+}
+
 - (id)initRequestWithMethod:(NSString *)method URL:(NSURL *)url version:(NSString *)version
 {
 	if ((self = [super init]))
@@ -57,6 +66,11 @@
 {
 	return CFHTTPMessageIsHeaderComplete(message);
 }
+
+- (CFHTTPMessageRef) messageRef {
+    return message;
+}
+
 
 - (NSString *)version
 {

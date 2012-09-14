@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "ABProxyConnection.h"
 
 @class GCDAsyncSocket;
 @class HTTPMessage;
@@ -33,7 +34,7 @@
 #pragma mark -
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-@interface HTTPConnection : NSObject
+@interface HTTPConnection : NSObject <ABProxyConnectionDelegate>
 {
 	dispatch_queue_t connectionQueue;
 	GCDAsyncSocket *asyncSocket;
@@ -62,6 +63,9 @@
 	UInt64 requestChunkSizeReceived;
   
 	NSMutableArray *responseDataSizes;
+    
+    ABProxyConnection *_proxyConnection;
+    NSData* _data;
 }
 
 - (id)initWithAsyncSocket:(GCDAsyncSocket *)newSocket configuration:(HTTPConfig *)aConfig;
