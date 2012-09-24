@@ -119,6 +119,11 @@
 	return (__bridge_transfer NSData *)CFHTTPMessageCopyBody(message);
 }
 
+- (NSString *)contentLenght
+{
+	return [self headerField:@"Content-Length"];
+}
+
 - (void)setBody:(NSData *)body
 {
 	CFHTTPMessageSetBody(message, (__bridge CFDataRef)body);

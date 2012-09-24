@@ -3,7 +3,7 @@
 #import "HTTPConnection.h"
 #import "HTTPMessage.h"
 #import "HTTPResponse.h"
-#import "HTTPDataResponse.h"
+#import "HTTPProxyResponse.h"
 #import "HTTPAuthenticationRequest.h"
 #import "DDNumber.h"
 #import "DDRange.h"
@@ -44,7 +44,7 @@
 
 // Log levels: off, error, warn, info, verbose
 // Other flags: trace
-static const int httpLogLevel = HTTP_LOG_FLAG_ERROR; // | HTTP_LOG_FLAG_TRACE;
+static const int httpLogLevel = HTTP_LOG_LEVEL_OFF; // | HTTP_LOG_FLAG_TRACE;
 
 // Define chunk size used to read in data for responses
 // This is how much data will be read from disk into RAM at a time
@@ -217,10 +217,11 @@ static NSMutableArray *recentNonces;
 			connectionQueue = dispatch_queue_create("HTTPConnection", NULL);
 		}
 		
-		// Take over ownership of the socket
+      	// Take over ownership of the socket
 		asyncSocket = newSocket;
+        lastSocket = newSocket;
 		[asyncSocket setDelegate:self delegateQueue:connectionQueue];
-		
+        
 		// Store configuration
 		config = aConfig;
 		
@@ -592,8 +593,6 @@ static NSMutableArray *recentNonces;
 **/
 - (void)start
 {
-    _proxyConnection = [[ABProxyConnection alloc] init];
-    
 	dispatch_async(connectionQueue, ^{ @autoreleasepool {
 		
 		if (!started)
@@ -642,14 +641,14 @@ static NSMutableArray *recentNonces;
 			NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithCapacity:3];
 			
 			// Configure this connection as the server
-			[settings setObject:[NSNumber numberWithBool:YES]
+			[settings setObject:[NSNumber numberWithBool:NO]
 						 forKey:(NSString *)kCFStreamSSLIsServer];
 			
 			[settings setObject:certificates
 						 forKey:(NSString *)kCFStreamSSLCertificates];
 			
 			// Configure this connection to use the highest possible SSL level
-			[settings setObject:(NSString *)kCFStreamSocketSecurityLevelNegotiatedSSL
+			[settings setObject:(NSString *)kCFStreamSSLAllowsAnyRoot
 						 forKey:(NSString *)kCFStreamSSLLevel];
 			
 			[asyncSocket startTLS:settings];
@@ -1018,14 +1017,21 @@ static NSMutableArray *recentNonces;
 	// Note: We already checked to ensure the method was supported in onSocket:didReadData:withTag:
 	
 	// Respond properly to HTTP 'GET' and 'HEAD' commands
-	httpResponse = [self httpResponseForMethod:method URI:uri];
-	
-	if (httpResponse == nil)
-	{
-		[self handleResourceNotFound];
-		return;
-	}
-	
+    
+    httpResponse = [self httpResponseForMethod:method URI:uri];
+        
+    if (httpResponse == nil) {
+        [self handleResourceNotFound];
+        return;
+    }
+    
+    NSDictionary* dict = [request allHeaderFields];
+    NSLog(@"%@", dict);
+    
+    if ([httpResponse isKindOfClass:[HTTPProxyResponse class]]) {
+        [(HTTPProxyResponse*)httpResponse sendRequest:[request messageRef]];
+    }
+
 	[self sendResponseHeadersAndBody];
 }
 
@@ -1050,12 +1056,14 @@ static NSMutableArray *recentNonces;
 	NSString *contentRangeStr = [NSString stringWithFormat:@"bytes %@/%qu", rangeStr, contentLength];
 	[response setHeaderField:@"Content-Range" value:contentRangeStr];
 	
+    
+    NSLog(@"Content range : %@",contentRangeStr);
 	return response;
 }
 
 /**
  * Prepares a multi-range response.
- * 
+ *
  * Note: The returned HTTPMessage is owned by the sender, who is responsible for releasing it.
 **/
 - (HTTPMessage *)newMultiRangeResponse:(UInt64)contentLength
@@ -1175,6 +1183,10 @@ static NSMutableArray *recentNonces;
 	{
 		contentLength = [httpResponse contentLength];
 	}
+    
+    if (contentLength == 0) {
+        return;
+    }
 	
 	// Check for specific range request
 	NSString *rangeHeader = [request headerField:@"Range"];
@@ -1222,14 +1234,16 @@ static NSMutableArray *recentNonces;
 		if ([ranges count] == 1)
 		{
 			response = [self newUniRangeResponse:contentLength];
+            
 		}
 		else
 		{
 			response = [self newMultiRangeResponse:contentLength];
+            
 		}
 	}
-	
-	BOOL isZeroLengthResponse = !isChunked && (contentLength == 0);
+    
+ 	BOOL isZeroLengthResponse = !isChunked && (contentLength == 0);
     
 	// If they issue a 'HEAD' command, we don't have to include the file
 	// If they issue a 'GET' command, we need to include the file
@@ -1244,7 +1258,8 @@ static NSMutableArray *recentNonces;
 	else
 	{
 		// Write the header response
-		NSData *responseData = [self preprocessResponse:response];
+        
+        NSData *responseData = [self preprocessResponse:response];
 		[asyncSocket writeData:responseData withTimeout:TIMEOUT_WRITE_HEAD tag:HTTP_PARTIAL_RESPONSE_HEADER];
 		
         NSString * responseDataString = [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
@@ -1299,21 +1314,18 @@ static NSMutableArray *recentNonces;
 				
 				NSUInteger bytesToRead = range.length < READ_CHUNKSIZE ? (NSUInteger)range.length : READ_CHUNKSIZE;
 				
-				NSData *data;
+				NSData *data = [httpResponse readDataOfLength:bytesToRead];
+                NSString * responseDataString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
                 
-                if (!_data) {
-                    data = [httpResponse readDataOfLength:bytesToRead];
-                } else {
-                    data = _data;
-                }
-            
+                
 				if ([data length] > 0)
 				{
 					[responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:[data length]]];
 					
 					long tag = [data length] == range.length ? HTTP_RESPONSE : HTTP_PARTIAL_RANGE_RESPONSE_BODY;
-					[asyncSocket writeData:data withTimeout:TIMEOUT_WRITE_BODY tag:tag];
-				}
+                    [asyncSocket writeData:data withTimeout:TIMEOUT_WRITE_BODY tag:tag];
+                    
+                }
 			}
 			else
 			{
@@ -1331,8 +1343,9 @@ static NSMutableArray *recentNonces;
 				
 				NSUInteger bytesToRead = range.length < READ_CHUNKSIZE ? (NSUInteger)range.length : READ_CHUNKSIZE;
 				
-				NSData *data = [httpResponse readDataOfLength:bytesToRead];
-				
+                NSData *data = [httpResponse readDataOfLength:bytesToRead];
+                NSString * responseDataString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                
 				if ([data length] > 0)
 				{
 					[responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:[data length]]];
@@ -1465,7 +1478,7 @@ static NSMutableArray *recentNonces;
 	UInt64 offset = [httpResponse offset];
 	UInt64 bytesRead = offset - range.location;
 	UInt64 bytesLeft = range.length - bytesRead;
-	
+    
 	if (bytesLeft > 0)
 	{
 		NSUInteger available = READ_CHUNKSIZE - writeQueueSize;
@@ -1522,8 +1535,8 @@ static NSMutableArray *recentNonces;
 		NSUInteger available = READ_CHUNKSIZE - writeQueueSize;
 		NSUInteger bytesToRead = bytesLeft < available ? (NSUInteger)bytesLeft : available;
 		
-		NSData *data = [httpResponse readDataOfLength:bytesToRead];
-		
+        NSData *data = [httpResponse readDataOfLength:bytesToRead];
+       		
 		if ([data length] > 0)
 		{
 			[responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:[data length]]];
@@ -1547,8 +1560,8 @@ static NSMutableArray *recentNonces;
 			NSUInteger available = READ_CHUNKSIZE - writeQueueSize;
 			NSUInteger bytesToRead = range.length < available ? (NSUInteger)range.length : available;
 			
-			NSData *data = [httpResponse readDataOfLength:bytesToRead];
-			
+            NSData *data = [httpResponse readDataOfLength:bytesToRead];
+           
 			if ([data length] > 0)
 			{
 				[responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:[data length]]];
@@ -1718,7 +1731,7 @@ static NSMutableArray *recentNonces;
 	//	return [[[HTTPAsyncFileResponse alloc] initWithFilePath:filePath forConnection:self] autorelease];
 	}
 	
-	return  [[HTTPDataResponse alloc] initWithData:_data];
+	return  [[HTTPProxyResponse alloc] initWithDelegate:self socket:asyncSocket];
 }
 
 - (WebSocket *)webSocketForURI:(NSString *)path
@@ -1730,12 +1743,12 @@ static NSMutableArray *recentNonces;
 	// Then return an instance of your custom WebSocket here.
 	// 
 	// For example:
-	// 
-	// if ([path isEqualToString:@"/myAwesomeWebSocketStream"])
+	// y	// if ([path isEqualToString:@"/myAwesomeWebSocketStream"])
 	// {
 	//     return [[[MyWebSocket alloc] initWithRequest:request socket:asyncSocket] autorelease];
 	// }
-	// 
+ 
+	 //
 	// return [super webSocketForURI:path];
 	
 	return nil;
@@ -1981,9 +1994,41 @@ static NSMutableArray *recentNonces;
 			[response setHeaderField:key value:value];
 		}
 	}
+   
+	return [response messageData];
+}
+
+- (NSData *)preprocessMyResponse:(HTTPMessage *)response
+{
+	HTTPLogTrace();
+	
+	// Override me to customize the response headers
+	// You'll likely want to add your own custom headers, and then return [super preprocessResponse:response]
+	
+	// Add standard headers
+	NSString *now = [self dateAsString:[NSDate date]];
+	[response setHeaderField:@"Date" value:now];
+	
+	// Add server capability headers
+	[response setHeaderField:@"Accept-Ranges" value:@"bytes"];
+	
+	// Add optional response headers
+		NSDictionary *responseHeaders = [request allHeaderFields];
+		
+		NSEnumerator *keyEnumerator = [responseHeaders keyEnumerator];
+		NSString *key;
+		
+		while ((key = [keyEnumerator nextObject]))
+		{
+			NSString *value = [responseHeaders objectForKey:key];
+			
+			[response setHeaderField:key value:value];
+		}
+	
 	
 	return [response messageData];
 }
+
 
 /**
  * This method is called immediately prior to sending the response headers (for an error).
@@ -2047,8 +2092,11 @@ static NSMutableArray *recentNonces;
  * Remember that this method will only be called after the socket reaches a CRLF, or after it's read the proper length.
 **/
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData*)data withTag:(long)tag
-{
+{    
+    BOOL replyWillBeLater = NO;
+    first = YES;
     
+    lastSocket = sock;
     
 	if (tag == HTTP_REQUEST_HEADER)
 	{
@@ -2100,11 +2148,10 @@ static NSMutableArray *recentNonces;
             NSURL *url = [request url];
             
             NSString * server = [NSString stringWithFormat:@"%@://%@",[url scheme],[url host]];
-            [_proxyConnection connectWithServer:server];
-            [_proxyConnection setDelegate:self];
-            [_proxyConnection sendStreamRequestWithMessage:([request messageRef])];
-  
+                       // Now we need to reply to the request
+           // replyWillBeLater = YES;
             
+                  //
 			// Content-Length MUST be present for upload methods (such as POST or PUT)
 			// and MUST NOT be present for other methods.
 			BOOL expectsUpload = [self expectsRequestBodyFromMethod:method atPath:uri];
@@ -2212,13 +2259,12 @@ static NSMutableArray *recentNonces;
 				{
 					// Empty upload
 					[self finishBody];
-					//[self replyToHTTPRequest];
+                    [self replyToHTTPRequest];
 				}
 			}
 			else
 			{
-				// Now we need to reply to the request
-				//[self replyToHTTPRequest];
+                [self replyToHTTPRequest];
 			}
 		}
 	}
@@ -2396,7 +2442,7 @@ static NSMutableArray *recentNonces;
 		{
 			[self finishBody];
             
-			//[self replyToHTTPRequest];
+			[self replyToHTTPRequest];
 		}
 	}
 }
@@ -2407,7 +2453,7 @@ static NSMutableArray *recentNonces;
 - (void)socket:(GCDAsyncSocket *)sock didWriteDataWithTag:(long)tag
 {
 	BOOL doneSendingResponse = NO;
-	
+    
 	if (tag == HTTP_PARTIAL_RESPONSE_BODY)
 	{
 		// Update the amount of data we have in asyncSocket's write queue
@@ -2433,8 +2479,9 @@ static NSMutableArray *recentNonces;
 	else if (tag == HTTP_PARTIAL_RANGE_RESPONSE_BODY)
 	{
 		// Update the amount of data we have in asyncSocket's write queue
-		[responseDataSizes removeObjectAtIndex:0];
-		
+       
+            [responseDataSizes removeObjectAtIndex:0];
+        
 		// We only wrote a part of the range - there may be more
 		[self continueSendingSingleRangeResponseBody];
 	}
@@ -2520,6 +2567,8 @@ static NSMutableArray *recentNonces;
 {
 	HTTPLogTrace();
 	
+    [(HTTPProxyResponse*)httpResponse cancel];
+    
 	asyncSocket = nil;
 	
 	[self die];
@@ -2559,7 +2608,7 @@ static NSMutableArray *recentNonces;
 		}
 		else
 		{
-			if (ranges == nil)
+			if (ranges == nil || [ranges count] == 0 )
 			{
 				[self continueSendingStandardResponseBody];
 			}
@@ -2619,8 +2668,8 @@ static NSMutableArray *recentNonces;
 	// If you override this method, you should take care to invoke [super finishResponse] at some point.
 	
 	request = nil;
-	
-	httpResponse = nil;
+    
+	//httpResponse = nil;
 	
 	ranges = nil;
 	ranges_headers = nil;
@@ -2644,7 +2693,7 @@ static NSMutableArray *recentNonces;
 	
 	BOOL shouldDie = NO;
 	
-	NSString *version = [request version];
+    NSString *version = [request version];
 	if ([version isEqualToString:HTTPVersion1_1])
 	{
 		// HTTP version 1.1
@@ -2696,19 +2745,37 @@ static NSMutableArray *recentNonces;
 	[[NSNotificationCenter defaultCenter] postNotificationName:HTTPConnectionDidDieNotification object:self];
 }
 
-#pragma mark - ABProxyConnection Delegate 
+#pragma mark - HTTPProxyResponse Delegate 
 
-- (void)ABProxyConnectionDidFailLoadingMessageRef:(CFHTTPMessageRef)messageRef {
+- (void)HTTPProxyResponse:(HTTPProxyResponse *)proxyResponse shouldForwardData:(NSData *)data{
     
-}
-
-- (void)ABProxyConnectionDidFinishLoadingMessageRef:(CFHTTPMessageRef)messageRef data:(NSData *)data {
-
-    [request setBody:data];
-    _data = data;
-    requestContentLength = 1429847202;
-    requestContentLengthReceived = [data length];
-    [self replyToHTTPRequest];
+    if (first) {
+        httpResponse = proxyResponse;
+        [self sendResponseHeadersAndBody];
+        first = NO;
+        return;
+    }
+        
+    size_t length = [data length];
+    const void * buffer = [data bytes];
+    
+    [proxyResponse.socket performBlock:^{
+        int socketFD = [proxyResponse.socket socketFD];
+        if (socketFD < 0 ) {
+            first = YES;
+            [proxyResponse cancel];
+             HTTPLogError(@"ERORR -1\n");
+        } else {
+           ssize_t result = write(socketFD, buffer, length);
+            
+            if (result > 0) {
+                [responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:result]];
+            } else {
+                first = YES;
+                [proxyResponse cancel];
+            }
+        }
+    }];
 }
 
 @end

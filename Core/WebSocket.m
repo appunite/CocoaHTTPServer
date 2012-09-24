@@ -36,7 +36,7 @@
 
 // Log levels: off, error, warn, info, verbose
 // Other flags : trace
-static const int httpLogLevel = HTTP_LOG_LEVEL_WARN; // | HTTP_LOG_FLAG_TRACE;
+static const int httpLogLevel = HTTP_LOG_LEVEL_VERBOSE; // | HTTP_LOG_FLAG_TRACE;
 
 #define TIMEOUT_NONE          -1
 #define TIMEOUT_REQUEST_BODY  10
@@ -312,7 +312,7 @@ static inline NSUInteger WS_PAYLOAD_LENGTH(UInt8 frame)
 	{
 		NSString *port = [NSString stringWithFormat:@"%hu", [asyncSocket localPort]];
 		
-		return [NSString stringWithFormat:@"http://localhost:%@", port];
+		return [NSString stringWithFormat:@"http://localhost:%@",port];
 	}
 	else
 	{
@@ -326,7 +326,7 @@ static inline NSUInteger WS_PAYLOAD_LENGTH(UInt8 frame)
 	
 	NSString *location;
 	
-	NSString *scheme = [asyncSocket isSecure] ? @"wss" : @"ws";
+	NSString *scheme = [asyncSocket isSecure] ? @"wss" : @"http";
 	NSString *host = [request headerField:@"Host"];
 	
 	NSString *requestUri = [[request url] relativeString];
@@ -335,7 +335,7 @@ static inline NSUInteger WS_PAYLOAD_LENGTH(UInt8 frame)
 	{
 		NSString *port = [NSString stringWithFormat:@"%hu", [asyncSocket localPort]];
 		
-		location = [NSString stringWithFormat:@"%@://localhost:%@%@", scheme, port, requestUri];
+		location = [NSString stringWithFormat:@"%@://localhost:80%@", scheme, requestUri];
 	}
 	else
 	{

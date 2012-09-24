@@ -40,7 +40,7 @@
 - (NSString *)headerField:(NSString *)headerField;
 
 - (void)setHeaderField:(NSString *)headerField value:(NSString *)headerFieldValue;
-
+- (NSString *)contentLenght;
 - (NSData *)messageData;
 
 - (NSData *)body;

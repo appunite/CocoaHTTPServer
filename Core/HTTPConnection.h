@@ -1,5 +1,5 @@
 #import <Foundation/Foundation.h>
-#import "ABProxyConnection.h"
+#import "HTTPProxyResponse.h"
 
 @class GCDAsyncSocket;
 @class HTTPMessage;
@@ -33,11 +33,16 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark -
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+static  BOOL first;
 
-@interface HTTPConnection : NSObject <ABProxyConnectionDelegate>
+@interface HTTPConnection : NSObject <HTTPProxyResponseDelegate>
 {
 	dispatch_queue_t connectionQueue;
+    
 	GCDAsyncSocket *asyncSocket;
+    
+    GCDAsyncSocket *lastSocket;
+	
 	HTTPConfig *config;
 	
 	BOOL started;
@@ -46,11 +51,12 @@
 	unsigned int numHeaderLines;
 	
 	BOOL sentResponseHeaders;
-	
+    
 	NSString *nonce;
 	long lastNC;
 	
 	NSObject<HTTPResponse> *httpResponse;
+	NSObject<HTTPResponse> *_saveResponse;
 	
 	NSMutableArray *ranges;
 	NSMutableArray *ranges_headers;
@@ -63,9 +69,6 @@
 	UInt64 requestChunkSizeReceived;
   
 	NSMutableArray *responseDataSizes;
-    
-    ABProxyConnection *_proxyConnection;
-    NSData* _data;
 }
 
 - (id)initWithAsyncSocket:(GCDAsyncSocket *)newSocket configuration:(HTTPConfig *)aConfig;
@@ -97,6 +100,8 @@
 - (NSObject<HTTPResponse> *)httpResponseForMethod:(NSString *)method URI:(NSString *)path;
 - (WebSocket *)webSocketForURI:(NSString *)path;
 
+- (void)replyToHTTPRequest;
+- (void)sendResponseHeadersAndBody;
 - (void)prepareForBodyWithSize:(UInt64)contentLength;
 - (void)processBodyData:(NSData *)postDataChunk;
 - (void)finishBody;
@@ -114,7 +119,6 @@
 
 - (BOOL)shouldDie;
 - (void)die;
-
 @end
 
 @interface HTTPConnection (AsynchronousHTTPResponse)

@@ -178,7 +178,7 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
 - (void)getDelegate:(id *)delegatePtr delegateQueue:(dispatch_queue_t *)delegateQueuePtr;
 - (void)setDelegate:(id)delegate delegateQueue:(dispatch_queue_t)delegateQueue;
 - (void)synchronouslySetDelegate:(id)delegate delegateQueue:(dispatch_queue_t)delegateQueue;
-
+- (void)completeCurrentWrite;
 /**
  * Traditionally sockets are not closed until the conversation is over.
  * However, it is technically possible for the remote enpoint to close its write stream.
