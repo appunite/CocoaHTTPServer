@@ -146,6 +146,8 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
 	id userData;
 }
 
+@property (nonatomic, assign) dispatch_queue_t socketQueue;
+
 /**
  * GCDAsyncSocket uses the standard delegate paradigm,
  * but executes all delegate callbacks on a given delegate dispatch queue.

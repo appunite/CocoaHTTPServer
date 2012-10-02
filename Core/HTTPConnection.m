@@ -44,7 +44,7 @@
 
 // Log levels: off, error, warn, info, verbose
 // Other flags: trace
-static const int httpLogLevel = HTTP_LOG_LEVEL_OFF; // | HTTP_LOG_FLAG_TRACE;
+static const int httpLogLevel = HTTP_LOG_LEVEL_VERBOSE; // | HTTP_LOG_FLAG_TRACE;
 
 // Define chunk size used to read in data for responses
 // This is how much data will be read from disk into RAM at a time
@@ -614,6 +614,7 @@ static NSMutableArray *recentNonces;
 		// Disconnect the socket.
 		// The socketDidDisconnect delegate method will handle everything else.
 		[asyncSocket disconnect];
+
 	}});
 }
 
@@ -1025,9 +1026,6 @@ static NSMutableArray *recentNonces;
         return;
     }
     
-    NSDictionary* dict = [request allHeaderFields];
-    NSLog(@"%@", dict);
-    
     if ([httpResponse isKindOfClass:[HTTPProxyResponse class]]) {
         [(HTTPProxyResponse*)httpResponse sendRequest:[request messageRef]];
     }
@@ -1159,11 +1157,14 @@ static NSMutableArray *recentNonces;
 
 - (void)sendResponseHeadersAndBody
 {
+    
+    
+    
 	if ([httpResponse respondsToSelector:@selector(delayResponseHeaders)])
 	{
 		if ([httpResponse delayResponseHeaders])
 		{
-			return;
+            return;
 		}
 	}
 	
@@ -1184,10 +1185,6 @@ static NSMutableArray *recentNonces;
 		contentLength = [httpResponse contentLength];
 	}
     
-    if (contentLength == 0) {
-        return;
-    }
-	
 	// Check for specific range request
 	NSString *rangeHeader = [request headerField:@"Range"];
 	
@@ -1994,7 +1991,7 @@ static NSMutableArray *recentNonces;
 			[response setHeaderField:key value:value];
 		}
 	}
-   
+    
 	return [response messageData];
 }
 
@@ -2094,8 +2091,7 @@ static NSMutableArray *recentNonces;
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData*)data withTag:(long)tag
 {    
     BOOL replyWillBeLater = NO;
-    first = YES;
-    
+  
     lastSocket = sock;
     
 	if (tag == HTTP_REQUEST_HEADER)
@@ -2264,6 +2260,7 @@ static NSMutableArray *recentNonces;
 			}
 			else
 			{
+                first = YES;
                 [self replyToHTTPRequest];
 			}
 		}
@@ -2725,7 +2722,7 @@ static NSMutableArray *recentNonces;
 	
 	// Override me if you want to perform any custom actions when a connection is closed.
 	// Then call [super die] when you're done.
-	// 
+	//
 	// See also the finishResponse method.
 	// 
 	// Important: There is a rare timing condition where this method might get invoked twice.
@@ -2755,27 +2752,31 @@ static NSMutableArray *recentNonces;
         first = NO;
         return;
     }
-        
+    
     size_t length = [data length];
     const void * buffer = [data bytes];
-    
+
     [proxyResponse.socket performBlock:^{
         int socketFD = [proxyResponse.socket socketFD];
         if (socketFD < 0 ) {
             first = YES;
             [proxyResponse cancel];
-             HTTPLogError(@"ERORR -1\n");
+            HTTPLogError(@"ERORR -1\n");
         } else {
            ssize_t result = write(socketFD, buffer, length);
             
             if (result > 0) {
                 [responseDataSizes addObject:[NSNumber numberWithUnsignedInteger:result]];
+                [proxyResponse setOffset:proxyResponse.offset+result];
+
             } else {
                 first = YES;
                 [proxyResponse cancel];
+
             }
         }
     }];
+
 }
 
 @end

@@ -17,6 +17,8 @@
 
 @end
 
+extern NSString *const ProxyThreadName;
+
 @interface HTTPProxyResponse : NSObject <HTTPResponse,HTTPProxyResponseDelegate,NSStreamDelegate>
 {
     HTTPConnection *_connection;
@@ -25,7 +27,11 @@
     
     ABMovieEncoder * _encoder;
     
+     BOOL _wasCancelled;
+    
     dispatch_queue_t sendQueue;
+    
+    NSMutableData * _tempData;
     
     NSString * _path;
     
@@ -44,6 +50,7 @@
 @property (nonatomic, weak) id<HTTPProxyResponseDelegate> delegate;
 @property (nonatomic, strong) GCDAsyncSocket* socket;
 
++ (void)startCFStreamThreadIfNeeded;
 - (id)initWithDelegate:(id)delegate socket:(GCDAsyncSocket*)socket;
 - (void)sendRequest:(CFHTTPMessageRef)request;
 - (void)cancel;

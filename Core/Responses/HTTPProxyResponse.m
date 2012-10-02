@@ -2,6 +2,7 @@
 #import "HTTPConnection.h"
 #import "DDRange.h"
 #import "HTTPLogging.h"
+#import "AirbenderAppSettings.h"
 
 #if ! __has_feature(objc_arc)
 #warning This file must be compiled with ARC. Use -fobjc-arc flag (or convert project to ARC).
@@ -105,9 +106,15 @@ static const int httpLogLevel = HTTP_LOG_LEVEL_OFF; // | HTTP_LOG_FLAG_TRACE;
     
     CFURLRef originUrl = CFHTTPMessageCopyRequestURL(request);
     NSURL *originNSUrl = (__bridge NSURL *)(originUrl);
+
+    NSString * server = [[[RKClient sharedClient] baseURL] host];
     
-    NSURL *customURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@:80%@",[originNSUrl scheme], [originNSUrl host], [originNSUrl path]]];
-    NSString *customHost = [NSString stringWithFormat:@"%@:80",[originNSUrl host]];
+#ifdef STATIC_PLAYER_MODE 
+    server = kStaticPlayerServer;
+#endif
+    
+    NSURL *customURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@:80%@",[originNSUrl scheme], server, [originNSUrl path]]];
+    NSString *customHost = [NSString stringWithFormat:@"%@:80",server];
     
     CFURLRef url = (__bridge CFURLRef) customURL;
     
@@ -121,6 +128,7 @@ static const int httpLogLevel = HTTP_LOG_LEVEL_OFF; // | HTTP_LOG_FLAG_TRACE;
     
     CFHTTPMessageSetHeaderFieldValue(newRequest, CFSTR("Accept"), CFSTR("*/*"));
     CFHTTPMessageSetHeaderFieldValue(newRequest, CFSTR("Accept-Encoding"), CFSTR("identity"));
+    CFHTTPMessageSetHeaderFieldValue(newRequest, CFSTR("Connection"), CFSTR("keep-alive"));
     CFHTTPMessageSetHeaderFieldValue(newRequest, CFSTR("Range"), range);
     CFHTTPMessageSetHeaderFieldValue(newRequest, CFSTR("Host"), (__bridge CFStringRef)(customHost));
     CFHTTPMessageSetHeaderFieldValue(newRequest, CFSTR("User-Agent"), CFSTR("AppleCoreMedia/1.0.0.9B176 (iPad; U; CPU OS 5_1 like Mac OS X; en_us)"));
@@ -141,7 +149,6 @@ static const int httpLogLevel = HTTP_LOG_LEVEL_OFF; // | HTTP_LOG_FLAG_TRACE;
             uint8_t buffer[BUFSIZE];
             NSInteger length = [aStream read:buffer maxLength:BUFSIZE];
             _data = [_encoder decodeDataWithBytes:[NSData dataWithBytes:(const void*)buffer length:length] length:length];
-            //_data = [NSData dataWithBytes:(const void*)buffer length:length];
             _response = (CFHTTPMessageRef) CFReadStreamCopyProperty((__bridge CFReadStreamRef)(aStream),kCFStreamPropertyHTTPResponseHeader);
             _responseDictionary = (__bridge NSDictionary*) CFHTTPMessageCopyAllHeaderFields(_response);
             [self didFinishLoading];
